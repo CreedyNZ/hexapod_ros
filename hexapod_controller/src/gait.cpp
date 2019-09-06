@@ -42,18 +42,18 @@ Gait::Gait( void )
     ros::param::get( "LEG_LIFT_HEIGHT", LEG_LIFT_HEIGHT );
     ros::param::get( "NUMBER_OF_LEGS", NUMBER_OF_LEGS );
     ros::param::get( "GAIT_STYLE", GAIT_STYLE);
-    cycle_period_ = 25;
+    cycle_period_ = 1;
     is_travelling_ = false;
     in_cycle_ = false;
     extra_gait_cycle_ = 1;
     current_time_ = ros::Time::now();
     last_time_ = ros::Time::now();
     gait_factor = 1.0;
+    gait_select(0);
     cycle_leg_number_ = {1,0,1,0,1,0};
     if(GAIT_STYLE == "RIPPLE")
     {
-      gait_factor = 0.5;
-      cycle_leg_number_ = {1,0,2,0,2,1};
+      gait_select(1);
     }
     period_distance = 0;
     period_height = 0;
@@ -66,7 +66,8 @@ Gait::Gait( void )
 void Gait::cyclePeriod( const geometry_msgs::Pose2D &base, hexapod_msgs::FeetPositions *feet, geometry_msgs::Twist *gait_vel )
 {
     period_height = sin( cycle_period_ * PI / CYCLE_LENGTH );
-
+        {
+    
     // Calculate current velocities for this period of the gait
     // This factors in the sinusoid of the step for accurate odometry
     current_time_ = ros::Time::now();
@@ -78,32 +79,99 @@ void Gait::cyclePeriod( const geometry_msgs::Pose2D &base, hexapod_msgs::FeetPos
 
     for( int leg_index = 0; leg_index < NUMBER_OF_LEGS; leg_index++ )
     {
-        // Lifts the leg and move it forward
-        if( cycle_leg_number_[leg_index] == 0 && is_travelling_ == true )
+        short int LegStep = cycle_period_ - cycle_leg_number_[leg_index];
+        // // Lifts the leg and move it forward
+        // if( cycle_leg_number_[leg_index] == 0 && is_travelling_ == true )
+        // {
+        //     period_distance = cos( cycle_period_ * PI / CYCLE_LENGTH );
+        //     feet->foot[leg_index].position.x = base.x * period_distance;
+        //     feet->foot[leg_index].position.y = base.y * period_distance;
+        //     feet->foot[leg_index].position.z = LEG_LIFT_HEIGHT * period_height;
+        //     feet->foot[leg_index].orientation.yaw = base.theta * period_distance;
+        // }
+        if ((is_travelling_ && (NrLiftedPos & 1) &&
+             LegStep == 0) ||
+            (!is_travelling_ && LegStep == 0 && ((abs(foot[leg_index].position.x) > 2) ||
+                                                 //Up
+                                                 (abs(foot[leg_index].position.y) > 2) || (abs(foot[leg_index].orientation.yaw) > 2))))
         {
-            period_distance = cos( cycle_period_ * PI / CYCLE_LENGTH );
-            feet->foot[leg_index].position.x = base.x * period_distance;
-            feet->foot[leg_index].position.y = base.y * period_distance;
-            feet->foot[leg_index].position.z = LEG_LIFT_HEIGHT * period_height;
-            feet->foot[leg_index].orientation.yaw = base.theta * period_distance;
+            foot[leg_index].position.x = 0;
+            foot[leg_index].position.z = -LEG_LIFT_HEIGHT * period_height;
+            foot[leg_index].position.y = 0;
+            foot[leg_index].orientation.yaw = 0;
+            GaitLegInAir[GaitCurrentLegNr] = true;
         }
-        // Moves legs backward pushing the body forward
-        if( cycle_leg_number_[leg_index] == 1 )
+        //Optional Half heigth Rear (2, 3, 5 lifted positions)
+        else if (((NrLiftedPos == 2 && LegStep == 0) || (NrLiftedPos >= 3 &&
+                                                         (LegStep == -1 || LegStep == (CYCLE_LENGTH - 1)))) &&
+                 is_travelling_)
         {
-            period_distance = cos( cycle_period_ * PI * gait_factor / CYCLE_LENGTH);
-            feet->foot[leg_index].position.x = -base.x * period_distance;
-            feet->foot[leg_index].position.y = -base.y * period_distance;
-            feet->foot[leg_index].position.z = 0;
-            feet->foot[leg_index].orientation.yaw = -base.theta * period_distance;
+            foot[leg_index].position.x = -base.x * period_distance / LiftDivFactor;
+            //Easier to shift between div factor: /1 (3/3), /2 (3/6) and 3/4
+            foot[leg_index].position.z = -3 * LEG_LIFT_HEIGHT * period_height / (3 + HalfLiftHeigth);
+            foot[leg_index].position.y = -base.y * period_distance / LiftDivFactor;
+            foot[leg_index].orientation.yaw  = -base.theta * period_distance / LiftDivFactor;
+            GaitLegInAir[GaitCurrentLegNr] = true;
         }
-        if( cycle_leg_number_[leg_index] == 2 )
+        // _A_
+        // Optional Half heigth front (2, 3, 5 lifted positions)
+        else if ((NrLiftedPos >= 2) && (LegStep == 1 || LegStep == -(CYCLE_LENGTH - 1)) && is_travelling_)
         {
-            period_distance = cos((CYCLE_LENGTH + cycle_period_) * PI * gait_factor / CYCLE_LENGTH);
-            feet->foot[leg_index].position.x = -base.x * period_distance;
-            feet->foot[leg_index].position.y = -base.y * period_distance;
-            feet->foot[leg_index].position.z = 0;
-            feet->foot[leg_index].orientation.yaw = -base.theta * period_distance;
+            foot[leg_index].position.x = base.x * period_distance / LiftDivFactor;
+            // Easier to shift between div factor: /1 (3/3), /2 (3/6) and 3/4
+            foot[leg_index].position.z = -3 * LEG_LIFT_HEIGHT * period_height / (3 + HalfLiftHeigth);
+            foot[leg_index].position.y = base.y * period_distance / LiftDivFactor;
+            foot[leg_index].orientation.yaw  = base.theta * period_distance / LiftDivFactor;
+            GaitLegInAir[GaitCurrentLegNr] = true;
         }
+
+        //Optional Half heigth Rear 5 LiftedPos (5 lifted positions)
+        else if (((NrLiftedPos == 5 && (LegStep == -2))) && is_travelling_)
+        {
+            foot[leg_index].position.x = -base.x * period_distance / 2;
+            foot[leg_index].position.z = -LEG_LIFT_HEIGHT * period_height / 2;
+            foot[leg_index].position.y = -base.y * period_distance / 2;
+            foot[leg_index].orientation.yaw  = -base.theta * period_distance / 2;
+            GaitLegInAir[GaitCurrentLegNr] = true;
+        }
+
+        //Optional Half heigth Front 5 LiftedPos (5 lifted positions)
+        else if ((NrLiftedPos == 5) && (LegStep == 2 || LegStep == -(CYCLE_LENGTH - 2)) && is_travelling_)
+        {
+            foot[leg_index].position.x = base.x * period_distance / 2;
+            foot[leg_index].position.z = -LEG_LIFT_HEIGHT * period_height / 2;
+            foot[leg_index].position.y = base.y * period_distance / 2;
+            foot[leg_index].orientation.yaw  = base.theta * period_distance / 2;
+            GaitLegInAir[GaitCurrentLegNr] = true;
+        }
+        //_B_
+        //Leg front down position //bug here?  From _A_ to _B_ there should only be one gaitstep, not 2!
+        //For example, where is the case of LegStep==0+2 executed when NRLiftedPos=3?
+        else if ((LegStep == FrontDownPos || LegStep == -(CYCLE_LENGTH - FrontDownPos)) && foot[leg_index].position.z < 0)
+        {
+            foot[leg_index].position.x = base.x * period_distance / 2;
+            foot[leg_index].position.y = base.y * period_distance / 2;
+            foot[leg_index].orientation.yaw  = base.theta * period_distance / 2;
+            foot[leg_index].position.z = 0;
+            GaitLegInAir[GaitCurrentLegNr] = true;
+
+            // Moves legs backward pushing the body forward
+            if (cycle_leg_number_[leg_index] == 1)
+            {
+                period_distance = cos(cycle_period_ * PI * gait_factor / CYCLE_LENGTH);
+                feet->foot[leg_index].position.x = -base.x * period_distance;
+                feet->foot[leg_index].position.y = -base.y * period_distance;
+                feet->foot[leg_index].position.z = 0;
+                feet->foot[leg_index].orientation.yaw = -base.theta * period_distance;
+            }
+            if (cycle_leg_number_[leg_index] == 2)
+            {
+                period_distance = cos((CYCLE_LENGTH + cycle_period_) * PI * gait_factor / CYCLE_LENGTH);
+                feet->foot[leg_index].position.x = -base.x * period_distance;
+                feet->foot[leg_index].position.y = -base.y * period_distance;
+                feet->foot[leg_index].position.z = 0;
+                feet->foot[leg_index].orientation.yaw = -base.theta * period_distance;
+            }
     }
 }
 
@@ -192,5 +260,103 @@ void Gait::sequence_change( std::vector<int> &vec )
         if( vec[i] == 0 ) vec[i] = 1;
         else if( vec[i] == 1 && GAIT_STYLE == "RIPPLE" ) vec[i] = 2;
         else vec[i] = 0;
+    }
+}
+
+//=============================================================================
+// Gait Select
+//=============================================================================
+
+void Gait::gait_select(void)
+{
+     switch (gait_type_)
+    {
+        case 0:
+            //Ripple Gait 12 steps
+            cycle_leg_number_ = {7,11,3,1,5,9};//['RR', 'RM', 'RF', 'LR', 'LM', 'LF']
+            NrLiftedPos = 3;
+            FrontDownPos = 2;
+            LiftDivFactor = 2;
+            HalfLiftHeigth = 3;
+            TLDivFactor = 8;
+            CYCLE_LENGTH = 12;  // ex CYCLE_LENGTH
+            NomGaitSpeed = DEFAULT_SLOW_GAIT;
+            break;
+        case 1:
+            //Tripod 8 steps
+            cycle_leg_number_ = {1,5,1,5,1,5};//['RR', 'RM', 'RF', 'LR', 'LM', 'LF']
+            NrLiftedPos = 3;
+            FrontDownPos = 2;
+            LiftDivFactor = 2;
+            HalfLiftHeigth = 3;
+            TLDivFactor = 4;
+            CYCLE_LENGTH = 8;
+            NomGaitSpeed = DEFAULT_SLOW_GAIT;
+            break;
+        case 2:
+            //Triple Tripod 12 step
+            cycle_leg_number_ = {5,10,3,11,4,9};//['RR', 'RM', 'RF', 'LR', 'LM', 'LF']
+            NrLiftedPos = 3;
+            FrontDownPos = 2;
+            LiftDivFactor = 2;
+            HalfLiftHeigth = 3;
+            TLDivFactor = 8;
+            CYCLE_LENGTH = 12;
+            NomGaitSpeed = DEFAULT_GAIT_SPEED;
+            break;
+        // case 3:
+        //     // Triple Tripod 16 steps, use 5 lifted positions
+
+        //     GaitLegNr[cRF] = 4;
+        //     GaitLegNr[cLM] = 5;
+        //     GaitLegNr[cRR] = 6;
+        //     GaitLegNr[cLF] = 12;
+        //     GaitLegNr[cRM] = 13;
+        //     GaitLegNr[cLR] = 14;
+
+        //     NrLiftedPos = 5;
+        //     FrontDownPos = 3;
+        //     LiftDivFactor = 4;
+        //     HalfLiftHeigth = 1;
+        //     TLDivFactor = 10;
+        //     CYCLE_LENGTH = 16;
+        //     NomGaitSpeed = DEFAULT_GAIT_SPEED;
+        //     break;
+        // case 4:
+        //     //Wave 24 steps
+        //     GaitLegNr[cLR] = 1;
+        //     GaitLegNr[cRF] = 21;
+        //     GaitLegNr[cLM] = 5;
+
+        //     GaitLegNr[cRR] = 13;
+        //     GaitLegNr[cLF] = 9;
+        //     GaitLegNr[cRM] = 17;
+
+        //     NrLiftedPos = 3;
+        //     FrontDownPos = 2;
+        //     LiftDivFactor = 2;
+        //     HalfLiftHeigth = 3;
+        //     TLDivFactor = 20;
+        //     CYCLE_LENGTH = 24;
+        //     NomGaitSpeed = DEFAULT_SLOW_GAIT;
+        //     break;
+        // case 5:
+        //     //Tripod 6 steps
+        //     GaitLegNr[cLR] = 4;
+        //     GaitLegNr[cRF] = 1;
+        //     GaitLegNr[cLM] = 1;
+
+        //     GaitLegNr[cRR] = 1;
+        //     GaitLegNr[cLF] = 4;
+        //     GaitLegNr[cRM] = 4;
+
+        //     NrLiftedPos = 2;
+        //     FrontDownPos = 1;
+        //     LiftDivFactor = 2;
+        //     HalfLiftHeigth = 1;
+        //     TLDivFactor = 4;
+        //     CYCLE_LENGTH = 6;
+        //     NomGaitSpeed = DEFAULT_GAIT_SPEED;
+        //     break;
     }
 }

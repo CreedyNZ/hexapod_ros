@@ -49,6 +49,7 @@ class Gait
     private:
         void cyclePeriod( const geometry_msgs::Pose2D &base, hexapod_msgs::FeetPositions *feet, geometry_msgs::Twist *gait_vel );
         void sequence_change( std::vector<int> &vec );
+        void set_gait(void );
         geometry_msgs::Pose2D smooth_base_;
         ros::Time current_time_, last_time_;
         bool is_travelling_;      // True if the robot is moving, not just in a cycle
@@ -63,6 +64,34 @@ class Gait
         double period_height;
         double gait_factor;
         std::vector<int> cycle_leg_number_; // Leg gait order (grouping) ['RR', 'RM', 'RF', 'LR', 'LM', 'LF']
+          // ex Phoenix +++++
+        //[gait]
+
+        short           NomGaitSpeed;                     //Nominal speed of the gait
+        short           TLDivFactor;                      //Number of steps that a leg is on the floor while walking
+        short           NrLiftedPos;                      //Number of positions that a single leg is lifted [1-3]
+        byte            LiftDivFactor;                    //Normaly: 2, when NrLiftedPos=5: 4
+
+        byte            HalfLiftHeigth;                   //If TRUE the outer positions of the ligted legs will be half height
+
+        byte            FrontDownPos;                     //Where the leg should be put down to ground
+
+        word            COGAngleStart1;                   // COG shifting starting angle
+        word            COGAngleStep1;                    // COG Angle Steps in degrees
+        byte            COGRadius;                        // COG Radius; the amount the body shifts
+        boolean         COGCCW;                           // COG Gait sequence runs counter clock wise
+
+        boolean         TravelRequest;                    //Temp to check if the gait is in motion
+        byte            StepsInGait;                      //Number of steps in gait
+
+        byte            GaitStep;                         //Actual Gait step
+
+        byte            GaitLegNr[CNT_LEGS];              //Init position of the leg
+
+        byte            GaitLegNrIn;                      //Input Number of the leg
+        
+        #define DEFAULT_GAIT_SPEED 50
+        #define DEFAULT_SLOW_GAIT 70
 };
 
 #endif // GAIT_H_
